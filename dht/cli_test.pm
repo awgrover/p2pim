@@ -26,9 +26,6 @@ sub main {
     $My_Jabber_EndPoint = p2pim::cli_test::im_end_point->new(jabber_id => 'awgrover@jabber.org/p2p');
     verbose 0,"Jabber id; ",$My_Jabber_EndPoint->jabber_id, " => ",$My_Jabber_EndPoint->infohash;
 
-    # my $ip_cmd = q#ifconfig `netstat -nr | egrep '^0.0.0.0' | awk '{print $8}'` | egrep '^ +inet ' | awk '{print $2}' | sed 's/addr://'#;
-    # my $my_ip = `$ip_cmd`;
-    #     chomp $my_ip;
     my $my_ip = 'localhost';
 
     $bt = Net::BitTorrent->new;
@@ -46,9 +43,10 @@ sub main {
     saveState();
 
     check_for_self();
+    announceIM();
+    check_for_self();
     }
 
-# announceIM();
 
 sub check_for_self {
     my $sha = $My_Jabber_EndPoint->infohash;
@@ -151,7 +149,7 @@ sub saveState {
 
 ##
 ###
-## 
+##  Not Used
 package p2pim::cli_test::im_end_point;
 # behaves enought like a ::Torrent object to work
 use Moose;
