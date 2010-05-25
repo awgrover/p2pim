@@ -7,11 +7,13 @@ use Data::Dumper;
 
 use AnyEvent::Blocker;
 
-my $w = AnyEvent::Blocker->new(newarg=>'someval');
-$w->something('arg1', a => 1, sub{ vverbose 0,"Something() finished with ".Dumper(\@_);} );
-$w->moreso('argfirst', sub{ vverbose 0,"moreso() finished with ".Dumper(\@_);} );
-my $w2 = AnyEvent::Blocker->new;
-$w2->something('warg1', a => 1, sub{ vverbose 0,"Something2() finished with ".Dumper(\@_);} );
+my $nb = AnyEvent::Blocker->new(new => 'xNet::Bonjour',base=>4, sub { vverbose 0,"Made ".shift });
+$nb->base( sub { vverbose 0, "base for $nb is ",@_});
+$nb->f1(1,2, sub{ vverbose 0,"f1() finished with ".Dumper(\@_);} );
+$nb->f2(3 , sub{ vverbose 0,"f2() finished with ".Dumper(\@_);} );
+
+# my $w2 = AnyEvent::Blocker->new;
+# $w2->something('warg1', a => 1, sub{ vverbose 0,"Something2() finished with ".Dumper(\@_);} );
 
 foreach(0..(1000*1000*20)) { my $i=$_; }
 
