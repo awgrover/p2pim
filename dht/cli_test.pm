@@ -1,10 +1,151 @@
 #!/usr/bin/env perl
-package p2pim::cli_test;
-our $PKG = __PACKAGE__;
-
 use strict; use warnings; no warnings 'uninitialized';
 use Carp;
 $SIG{ __DIE__ } = sub { Carp::confess( @_ ) };
+use threads 'exit' => 'threads_only';
+use threads::shared;
+use Thread::Queue;
+
+our $DhtCommands = Thread::Queue->new();
+
+#######
+#
+package p2pim::main;
+use Data::Dumper;
+use feature "switch";
+use Verbose;
+use threads::shared;
+use POSIX;
+
+our $PKG = __PACKAGE__;
+our $My_Jabber_EndPoint;
+our $CommandsDone;
+
+our %Commands = (
+  # command => [ \&prepare($rest-of-line -> $queued-data), \&thread's-handle($queued-data) ]
+  # first sub can be a scalar value -> $queued-data
+  '?' => [
+    sub { help() },
+    ],
+
+  find => [
+    sub {
+      my ($sha) = @_;
+      $sha = $My_Jabber_EndPoint->infohash if $sha eq 'self';
+      $sha;
+      },
+    'find_sha'
+    ],
+  exit => [], # handled explicitly
+  restart => [], # handled explicitly
+  nothread => [], # handled explicitly
+  announce => [
+    sub {$My_Jabber_EndPoint->infohash},
+    'announceIM'
+    ],
+  find_ip => [
+    sub { $My_Jabber_EndPoint->infohash },
+    'find_ip'
+    ],
+  nodes => [
+    0,
+    'print_nodes'
+    ],
+  queue => [
+    0,
+    'queue'
+    ],
+  save => [
+    0,
+    'saveState'
+    ],
+  makeroom => [
+    0,
+    'makeRoom'
+    ],
+  purge => [
+    0,
+    'purge'
+    ],
+  );
+
+sub help {
+  foreach (keys %Commands) {
+    print "Command $_\n";
+    }
+  undef;
+  }
+
+sub main {
+  $My_Jabber_EndPoint = p2pim::cli_test::im_end_point->new(jabber_id => 'awgrover@jabber.org/p2p');
+  verbose 0,"Jabber id; ",$My_Jabber_EndPoint->jabber_id, " => ",$My_Jabber_EndPoint->infohash;
+
+  open(STDERR, ">log") || die "can't open log for write";
+  my $dht_thread = threads->create(\&p2pim::dht::main);
+
+  LINES: while (<>) {
+    chomp;
+    my $line = $_;
+
+    vverbose 0,"Command? '$_'";
+    given ($line) {
+      when ('exit') {
+        $dht_thread->exit;
+        last LINES;
+        }
+      when ('restart') {
+        vverbose 0,"restart thread...";
+        $dht_thread->kill(9) if $dht_thread->is_running;
+        $dht_thread->join if $dht_thread->is_joinable;
+        $dht_thread = threads->create(\&p2pim::dht::main);
+        print "Restarted thread";
+        }
+      # doesn't work... maybe it closes STDIN?
+      when ('nothread') {
+        vverbose 0,"stop thread...";
+        $dht_thread->kill(9) if $dht_thread->is_running;
+        $dht_thread->join if $dht_thread->is_joinable;
+        print "Thread stopped";
+        }
+      default {
+        if (!$dht_thread->is_running()) {
+          print "Thread is dead\n";
+          last LINES;
+          }
+
+        my $hit;
+        keys %Commands; # reset iterator
+        while (my ($command, $prepAndHandle) = each(%Commands)) {
+          $command = quotemeta("".$command);
+          if ($line =~ /^$command(?:$|(?: (.+)))/) {
+            vverbose 0,__PACKAGE__." Send command $command";
+            my ($prep) = @$prepAndHandle;
+            my $data = ref($prep) eq 'CODE' ? &$prep($1) : $prep;
+            if (defined $data) {
+              my @command :shared = ( $command => $data );
+              $DhtCommands->enqueue(\@command);
+              }
+            $hit = 1;
+            last;
+            }
+          }
+        if (!$hit) {
+          print "? Unrecognized command: $_\n";
+          warn "Unrecognized command: $_\n";
+          }
+        last LINES if $CommandsDone;
+        }
+      }
+    }
+
+  $dht_thread->join if $dht_thread->joinable;
+  }
+
+####
+#
+package p2pim::dht;
+
+use strict; use warnings; no warnings 'uninitialized';
 
 use Verbose; $kVerbose = $ENV{'VERBOSE'};
 
@@ -18,15 +159,12 @@ my $BootstrapTimeout = 20; # seconds
 my $Respond_Time = 3;
 my $Virgin = 1;
 my $Old_Nodes = [];
-my $My_Jabber_EndPoint;
 my $bt;
 my %Peers; # sha1=>[ip..]
 my $LAN_IP;
 my $Saved_State;
 
 sub main {
-    $My_Jabber_EndPoint = p2pim::cli_test::im_end_point->new(jabber_id => 'awgrover@jabber.org/p2p');
-    verbose 0,"Jabber id; ",$My_Jabber_EndPoint->jabber_id, " => ",$My_Jabber_EndPoint->infohash;
 
     my $my_ip = 'localhost';
 
@@ -43,43 +181,37 @@ sub main {
     vverbose 0,"on udp port ",$bt->_udp_port;
 
     vverbose 0,"dht node id ",sprintf("%*v.2X",":",$bt->_dht->node_id);
+    vverbose 0,"dht node id ",unpack('H40',$bt->_dht->node_id);
 
     boostrapDHT();
     listen_and_respond();
 
     saveState();
 
-    check_for_self();
-    if (0 && ! $Peers{$My_Jabber_EndPoint->infohash}) {
-        announceIM();
-        listen_and_respond();
-        check_for_self();
-        }
-
     listen_and_respond(-1);
     }
 
 
-sub check_for_self {
-    my $sha = $My_Jabber_EndPoint->infohash;
-    # $bt->torrents->{$sha} = $My_Jabber_EndPoint;
-    $bt->_dht->_get_peers($sha, sub { _handle_get_peer_response(@_)});
-    listen_and_respond();
-    if (exists $Peers{$sha}) {
-        vverbose 0,"Found peer ".$My_Jabber_EndPoint->jabber_id." (sha1 $sha)".join(", ",@{$Peers{$sha}});
-        }
-    else {
-        vverbose 0,"Not found peer ".$My_Jabber_EndPoint->jabber_id." (sha1 $sha)";
-        }
-    }
-    
+sub find_sha {
+  my ($sha) = @_;
+  $bt->_dht->_get_peers($sha, sub { _handle_get_peer_response(@_)});
+  }
+
+sub queue {
+  $bt->_dht->_whats_outstanding;
+  print "See log\n";
+  }
+
+sub print_nodes {
+  $bt->_dht->_print_nodes;
+  }
+
 sub announceIM {
     # we use the dht announce_peer to advertise our IM end-point
     # Instead of the torrent's sha1, we'll use the jabber-id's sha1
-    my $sha = $My_Jabber_EndPoint->infohash;
-    vverbose 0,"Jabber insert ",$My_Jabber_EndPoint->jabber_id," => ",$My_Jabber_EndPoint->infohash;
+    my ($sha) = @_;
+    vverbose 0,"Announce $sha";
     $bt->_dht->_announce_sha1($sha);
-    listen_and_respond();
     }
 
 sub boostrapDHT {
@@ -111,15 +243,33 @@ sub listen_and_respond {
         $bt->do_one_loop;
         vverbose 0,"." if $timeout > 0 && $last != time;
         $last = time;
+
+        if ($DhtCommands->pending) {
+          my ($command, $data) = @{$DhtCommands->dequeue};
+          vverbose 0,__PACKAGE__." command $command => $data";
+
+          my $handler = $Commands{$command}->[1];
+          if (ref($handler) eq 'CODE') {
+            &$handler($data);
+            }
+          else {
+            no strict 'refs';
+            &{$handler}($data);
+            use strict 'refs';
+            }
+          }
         }
     }
 
 sub _handle_get_peer_response {
-    my ($sha1, $peers) = @_;
+    my ($sha1, $packet, $peers) = @_;
     vverbose 0, "Peer response! $sha1 : ",Dumper($peers);
     warn "The sha1(someuser)==$sha1 appears ".scalar(@$peers)." times" if @$peers > 1;
     $Peers{$sha1} = $peers;
-    update_lan_ip($_) foreach @$peers;
+    if ($sha1 eq $bt->_dht->node_id) {
+      update_lan_ip($_) foreach @$peers;
+      }
+    print "IP $sha1 ",join(" ",@$peers),"\n";
     }
 
 sub update_lan_ip {
@@ -188,6 +338,20 @@ sub saveState {
     $stateH->close;
     }
 
+sub find_ip {
+  my ($sha) = @_;
+  vverbose 0,"extant or ask for peer $sha";
+  if ( exists $Peers{$sha}) {
+    print $Peers{$sha},"\n";
+    }
+  else {
+    $bt->_dht->_get_peers($sha, sub { _handle_get_peer_response($sha, @_)});
+    }
+  }
+
+sub makeRoom {
+  $bt->_dht->make_room;
+  }
 
 ##
 ###
@@ -202,10 +366,6 @@ has 'jabber_id' => (is => 'ro');
 sub infohash {
     my $self=shift;
     sha1_hex($self->jabber_id);
-    }
-
-sub trackers {
-    []
     }
 
 no Moose;

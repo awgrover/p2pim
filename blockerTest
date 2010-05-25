@@ -1,0 +1,24 @@
+#!/usr/bin/env perl
+
+use EV; use AnyEvent;
+use lib qw(.);
+use Verbose;
+use Data::Dumper;
+
+use AnyEvent::Blocker;
+
+my $w = AnyEvent::Blocker->new(newarg=>'someval');
+$w->something('arg1', a => 1, sub{ vverbose 0,"Something() finished with ".Dumper(\@_);} );
+$w->moreso('argfirst', sub{ vverbose 0,"moreso() finished with ".Dumper(\@_);} );
+my $w2 = AnyEvent::Blocker->new;
+$w2->something('warg1', a => 1, sub{ vverbose 0,"Something2() finished with ".Dumper(\@_);} );
+
+foreach(0..(1000*1000*20)) { my $i=$_; }
+
+my $aew = AnyEvent->timer (after => 4, cb => sub{ vverbose 0,"Timer!"});
+
+print "wait, using $AnyEvent::MODEL\n";
+EV::loop;
+print "loop exited\n";
+sleep 2;
+print "Done\n";
