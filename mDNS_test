@@ -1,0 +1,119 @@
+#!/usr/bin/env perl
+package blah;
+our $Package = __PACKAGE__;
+use strict; use warnings; no warnings 'uninitialized';
+
+use EV; use AnyEvent;
+use lib qw(.);
+use Verbose;
+use Data::Dumper;
+use AnyEvent::mDNS;
+use AnyEvent::Blocker;
+
+my %commandable; %commandable = (
+  help => sub { print keys(%commandable),"\n" },
+  );
+
+sub main {
+  my @ae;
+
+  AnyEvent::mDNS::discover '_xmpp2p._tcp', 
+    sub {
+      print "xmpp2p users\n";
+      vverbose 0,Dumper(@_);
+      foreach (@_) {
+        printf "\t%20s @%20s:%05.5d\n",$_->{'name'}, $_->{'host'}, $_->{'port'};
+        }
+      };
+  my $mDNS = AnyEvent::Blocker->new(new => 'Net::Rendezvous::Publish',
+    backend => 'Net::Rendezvous::Publish::Backend::Avahi',
+    sub { vverbose 0,"Made ".shift }
+    );
+  $commandable{'mDNS'} = $mDNS;
+
+  my $service1;
+  $mDNS->publish(
+    name => 'awgrover@localhost/xmpp2p',
+    type => '_xmpp2p._tcp',
+    port => 34567,
+    domain => 'local',
+    sub {($service1)=@_; vverbose 0,"Published ".Dumper(\@_)}
+    );
+
+  push @ae, AnyEvent->timer(after => 4, cb => sub{ vverbose 0,"Timer!"});
+
+  push @ae, AnyEvent->io(
+    fh => \*STDIN,
+    poll => 'r',
+    cb => \&commands
+    );
+
+  print "wait, using $AnyEvent::MODEL\n";
+  EV::loop;
+  print "loop exited\n";
+  sleep 2;
+  print "Done\n";
+  }
+
+sub commands {
+  my $line = <>;
+  chomp $line;
+  my ($cmd, $args) = $line =~ /^(\S+)(?:\s+(.+))?/;
+  vverbose 0,"Parsed as $cmd($args)";
+  
+  my ($object, $method) = split '->',$cmd;
+  vverbose 0,"Parsed as ${object}->$method";
+  $object ||= $cmd;
+  vverbose 0,"Command is ${object}->$method";
+
+  if (exists $commandable{$object}) {
+    if ($method) {
+      $commandable{$object}->$method($args, sub { print "# $line = ".join(', ',@_),"\n"} );
+      }
+    else {
+      print "Running...\n";
+      $commandable{$object}->($args);
+      }
+    }
+  else {
+    warn "No such ${object}->$method\n";
+    print "Commandables:\n\t".join("\n\t",keys(%commandable)),"\n";
+    }
+  }
+
+package Net::Rendezvous::Publish;
+# extend it
+use Net::Rendezvous::Publish;
+use Scalar::Util qw(refaddr);
+use Verbose;
+use Data::Dumper;
+
+my $was;
+BEGIN {$was = \&Net::Rendezvous::Publish::publish;
+  delete $Net::Rendezvous::Publish::{'publish'}}
+my %services;
+
+sub publish {
+  my $service = &$was(@_);
+  vverbose 0,"Published $service, saved as ".refaddr($service);
+  $services{refaddr $service} = $service;
+  refaddr $service;
+  }
+
+sub stop {
+  my $self=shift;
+  my ($service_id) = @_;
+  if (exists $services{$service_id}) {
+    vverbose 0,"Stopping service_id $service_id, ".$services{$service_id};
+    $services{$service_id}->stop;
+    }
+  else {
+    vverbose 0,"Warning, tried to stop '$service_id', but not a known service handle: ".join(", ",keys %services);
+    }
+  }
+
+sub services {
+  return keys %services;
+  }
+
+$Package->main;

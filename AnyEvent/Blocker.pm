@@ -39,9 +39,27 @@ The ithread model we run under implies:
   * You should only use coarse-grained, high level methods in the blocking-module.
   * You shouldn't pass lots of data around.
 
+=h2 Caveats
+
+Since the blocking-module is run in an ithread, you have to watch for interesting
+"phase" issues. E.g.:
+  * Moose attributes are created at run-time.
+    Calling AnyEvent::Blocker->new() means any "has" that is lexically
+    later won't take effect for the thread. I tried to test:
+
+      my $proxy = AnyEvent::Blocker->new(new=>"Some::Package", sub{});
+      # Notice that the "has", below, hasn't run yet.
+      $proxy->x(sub{}); # no such method "x"
+      ...
+      package Some::Package;
+      use Moose;
+      has x => (is => 'ro'); # no-such method in the thread
+
 =h1 Methods
 
-All methods take a callback as the last argument.
+All methods take a callback as the last argument. If you don't care, use
+
+  sub{}
 
 =h2 AnyEvent::Blocker->new( someMethodName => 'Some::Package', args..., \&callback($proxy) )
 
@@ -126,6 +144,10 @@ Capture some exceptions (like method-unknown) and report them without killing th
 
 There is no provision for destroying the blocking-module-thread.
 
+We initialize some stuff at compile time. Like the queues and pipe. 
+
+And we force threads to exit individually.
+
 =h1 See Also
 
 AnyEvent
@@ -209,6 +231,10 @@ sub BUILD {
   threads->create(sub{ 
     # (It takes a looong time for this thread to start.)
 
+    my $blockerPath = $class;
+    $blockerPath =~ s/::/\//g;
+    require $blockerPath.".pm";
+    import $class;
     AnyEvent::Blocker::Wrapper::run($class->$newMethod(@$args), $new_callerid, $self->_commandQueue);
 
     # The module is probably blocked when we want to exit.
@@ -295,29 +321,5 @@ sub run {
     $PipeSend->print(threads->tid); # just a signal
     }
   }
-
-
-package xNet::Bonjour;
-use Moose;
-use Verbose;
-use Data::Dumper;
-
-has base => ( is => 'rw', default => 5 );
-
-sub f1 {
-  my $self=shift;
-  my ($a,$b) = @_;
-  vverbose 0,"Called: $self ",Dumper(\@_);
-  return $a+$b;
-  }
-
-sub f2 {
-  my $self=shift;
-  my ($a) = @_;
-  vverbose 0,"Called: $self ",Dumper(\@_);
-  return $a+$self->base;
-  }
-
-no Moose;
 
 1;

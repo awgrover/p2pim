@@ -7,20 +7,48 @@ use Data::Dumper;
 
 use AnyEvent::Blocker;
 
-my $nb = AnyEvent::Blocker->new(new => 'xNet::Bonjour',base=>4, sub { vverbose 0,"Made ".shift });
-$nb->base( sub { vverbose 0, "base for $nb is ",@_});
-$nb->f1(1,2, sub{ vverbose 0,"f1() finished with ".Dumper(\@_);} );
-$nb->f2(3 , sub{ vverbose 0,"f2() finished with ".Dumper(\@_);} );
+our $Package = __PACKAGE__;
+sub main {
+  my $nb = AnyEvent::Blocker->new(new => 'xNet::Bonjour',base=>4, sub { vverbose 0,"Made ".shift });
+  $nb->base( sub { vverbose 0, "base for $nb is ",@_});
+  $nb->f1(1,2, sub{ vverbose 0,"f1() finished with ".Dumper(\@_);} );
+  $nb->f2(3 , sub{ vverbose 0,"f2() finished with ".Dumper(\@_);} );
 
-# my $w2 = AnyEvent::Blocker->new;
-# $w2->something('warg1', a => 1, sub{ vverbose 0,"Something2() finished with ".Dumper(\@_);} );
+  # my $w2 = AnyEvent::Blocker->new;
+  # $w2->something('warg1', a => 1, sub{ vverbose 0,"Something2() finished with ".Dumper(\@_);} );
 
-foreach(0..(1000*1000*20)) { my $i=$_; }
+  foreach(0..(1000*1000*20)) { my $i=$_; }
 
-my $aew = AnyEvent->timer (after => 4, cb => sub{ vverbose 0,"Timer!"});
+  my $aew = AnyEvent->timer (after => 4, cb => sub{ vverbose 0,"Timer!"});
 
-print "wait, using $AnyEvent::MODEL\n";
-EV::loop;
-print "loop exited\n";
-sleep 2;
-print "Done\n";
+  print "wait, using $AnyEvent::MODEL\n";
+  EV::loop;
+  print "loop exited\n";
+  sleep 2;
+  print "Done\n";
+  }
+
+
+package xNet::Bonjour;
+use Moose;
+use Verbose;
+use Data::Dumper;
+
+has base => ( is => 'rw', default => 5 );
+
+sub f1 {
+  my $self=shift;
+  my ($a,$b) = @_;
+  vverbose 0,"Called: $self ",Dumper(\@_);
+  return $a+$b;
+  }
+
+sub f2 {
+  my $self=shift;
+  my ($a) = @_;
+  vverbose 0,"Called: $self ",Dumper(\@_);
+  return $a+$self->base;
+  }
+
+no Moose;
+$Package->main;
