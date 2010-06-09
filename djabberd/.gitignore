@@ -1,0 +1,4 @@
+jabberd.log
+*.pid
+log.conf
+roster.sqlite

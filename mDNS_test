@@ -9,9 +9,15 @@ use Verbose;
 use Data::Dumper;
 use AnyEvent::mDNS;
 use AnyEvent::Blocker;
+use Digest::SHA qw(sha1_hex);
 
-my %commandable; %commandable = (
-  help => sub { print keys(%commandable),"\n" },
+my @ExampleID = qw(
+  awgrover@charmcitysites.com/xmpp2p
+  partyb@test2.localhost
+  );
+
+my %Commandable; %Commandable = (
+  help => sub { print keys(%Commandable),"\n" },
   );
 
 sub main {
@@ -29,16 +35,18 @@ sub main {
     backend => 'Net::Rendezvous::Publish::Backend::Avahi',
     sub { vverbose 0,"Made ".shift }
     );
-  $commandable{'mDNS'} = $mDNS;
+  $Commandable{'mDNS'} = $mDNS;
 
   my $service1;
-  $mDNS->publish(
-    name => 'awgrover@localhost/xmpp2p',
-    type => '_xmpp2p._tcp',
-    port => 34567,
-    domain => 'local',
-    sub {($service1)=@_; vverbose 0,"Published ".Dumper(\@_)}
-    );
+  foreach my $id (@ExampleID) {
+    $mDNS->publish(
+      name => sha1_hex($id),
+      type => '_xmpp2p._tcp',
+      port => 34567,
+      domain => 'local',
+      sub {($service1)=@_; vverbose 0,"Published ".Dumper(\@_)}
+      );
+    }
 
   push @ae, AnyEvent->timer(after => 4, cb => sub{ vverbose 0,"Timer!"});
 
@@ -66,18 +74,18 @@ sub commands {
   $object ||= $cmd;
   vverbose 0,"Command is ${object}->$method";
 
-  if (exists $commandable{$object}) {
+  if (exists $Commandable{$object}) {
     if ($method) {
-      $commandable{$object}->$method($args, sub { print "# $line = ".join(', ',@_),"\n"} );
+      $Commandable{$object}->$method($args, sub { print "# $line = ".join(', ',@_),"\n"} );
       }
     else {
       print "Running...\n";
-      $commandable{$object}->($args);
+      $Commandable{$object}->($args);
       }
     }
   else {
     warn "No such ${object}->$method\n";
-    print "Commandables:\n\t".join("\n\t",keys(%commandable)),"\n";
+    print "Commandables:\n\t".join("\n\t",keys(%Commandable)),"\n";
     }
   }
 

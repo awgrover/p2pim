@@ -1,0 +1,49 @@
+#!/bin/bash
+# --- [stop]
+# uses prod.log.conf unless log.conf exists
+# Kills running daemon, then starts (using .pid file)
+
+me=`basename $0`
+here=`readlink $0`
+if [ "$here" == "" ]; then
+    here=$0
+fi
+here=`dirname $here`
+
+pushd $here >/dev/null
+
+pidfile="djabberd.$me.pid"
+child=`cat $pidfile 2>/dev/null`
+
+if [ "$child" != '' ]; then
+    if ps -p $child >/dev/null 2>&1; then
+        echo "Killing extant " `ps --no-heading -p $child`
+        kill $child
+        sleep 1;
+        if ps -p $child >/dev/null 2>&1; then
+            echo "Didn't die!"
+            exit 1
+        fi
+    else
+        rm $pidfile
+    fi
+fi
+
+if [ "$1" == 'stop' ]; then
+    exit 0
+fi
+
+logfile=prod.log.conf
+if [ -e 'log.conf' ]; then
+    logfile=log.conf
+fi
+
+(
+export PERL5LIB=..:$PERL5LIB
+./run.djabberd -logconf $logfile -conffile djabberd.$me.conf -debug=4&
+child=$!
+echo $child > $pidfile
+wait $child
+(rm $pidfile >/dev/null 2>&1 || exit 0)
+echo "Done: $child $me"
+)&
