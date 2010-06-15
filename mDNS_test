@@ -3,13 +3,13 @@ package blah;
 our $Package = __PACKAGE__;
 use strict; use warnings; no warnings 'uninitialized';
 
-use EV; use AnyEvent;
 use lib qw(.);
+use EV; use AnyEvent;
 use Verbose;
 use Data::Dumper;
+use Digest::SHA qw(sha1_hex);
 use AnyEvent::mDNS;
 use AnyEvent::Blocker;
-use Digest::SHA qw(sha1_hex);
 
 my @ExampleID = qw(
   awgrover@charmcitysites.com/xmpp2p
@@ -17,20 +17,24 @@ my @ExampleID = qw(
   );
 
 my %Commandable; %Commandable = (
-  help => sub { print keys(%Commandable),"\n" },
+  help => sub { print "\t".join("\n\t", keys(%Commandable),"\n")."\n" },
+  discover => \&discover,
   );
 
-sub main {
-  my @ae;
-
+sub discover {
   AnyEvent::mDNS::discover '_xmpp2p._tcp', 
     sub {
       print "xmpp2p users\n";
       vverbose 0,Dumper(@_);
       foreach (@_) {
-        printf "\t%20s @%20s:%05.5d\n",$_->{'name'}, $_->{'host'}, $_->{'port'};
+        printf "\t%20s @%20s:%05.5d\n",$_->{'name'}, $_->{'ip'}, $_->{'port'};
         }
       };
+  }
+
+sub main {
+  my @ae;
+
   my $mDNS = AnyEvent::Blocker->new(new => 'Net::Rendezvous::Publish',
     backend => 'Net::Rendezvous::Publish::Backend::Avahi',
     sub { vverbose 0,"Made ".shift }
@@ -48,7 +52,7 @@ sub main {
       );
     }
 
-  push @ae, AnyEvent->timer(after => 4, cb => sub{ vverbose 0,"Timer!"});
+  push @ae, AnyEvent->timer(after => 4, cb => sub{ vverbose 0,"Timer!"; discover();});
 
   push @ae, AnyEvent->io(
     fh => \*STDIN,

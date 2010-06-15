@@ -25,8 +25,11 @@ if [ "$child" != '' ]; then
             exit 1
         fi
     else
-        rm $pidfile
+        echo "No extant to kill (stale pidfile)"
+        rm $pidfile 2>/dev/null
     fi
+else
+    echo "No pidfile, not trying to kill"
 fi
 
 if [ "$1" == 'stop' ]; then
@@ -36,6 +39,7 @@ fi
 logfile=prod.log.conf
 if [ -e 'log.conf' ]; then
     logfile=log.conf
+    echo "using log.conf (" `readlink log.conf` ")"
 fi
 
 (
@@ -43,7 +47,9 @@ export PERL5LIB=..:$PERL5LIB
 ./run.djabberd -logconf $logfile -conffile djabberd.$me.conf -debug=4&
 child=$!
 echo $child > $pidfile
+echo "I'm $child"
+psinfo=`ps --no-heading -p $child`
 wait $child
 (rm $pidfile >/dev/null 2>&1 || exit 0)
-echo "Done: $child $me"
+echo "Done: $child $me $psinfo"
 )&

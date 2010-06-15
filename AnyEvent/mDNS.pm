@@ -31,50 +31,73 @@ sub discover($%) { ## no critic
     my $t; $t = AnyEvent::Handle->new(
         fh => $sock,
         timeout => $args{timeout} || 3,
+        on_error => sub { 
+          my ($h, $fatal, $message) = @_; 
+          warn "Error on $sock, fatal=$fatal, $message";
+          $h = undef;
+          },
         on_timeout => sub {
             undef $t;
             $cb->(values %found);
         },
+        on_eof => sub {
+          my ($h) = @_;
+          warn "EOF on $sock";
+          },
         on_read => sub {
             my $handle = shift;
-            my $buf = delete $handle->{rbuf};
+            my $buf = $handle->rbuf;
             my $res = AnyEvent::DNS::dns_unpack $buf;
 
-            my %service;
-            $service{'proto'} = $proto;
+            my %services; # fullname => { fullname => x, name => x, }
+            my %ips; # { ip => x, ipv6 => x };
+
             foreach my $rec (@{ $res->{an} }) {
                 my $type = $rec->[1];
 
                 ($type eq 'ptr') && do {
                     if (lc($rec->[0]) eq $fqdn) {
-                        $service{'fullname'} = $service{'name'} = $rec->[3];
-                        $service{'name'} =~ s/\.$fqdn$//;
+                        my $fullname = $rec->[3];
+                        my $service = $services{$fullname} ||= {};
+                        $service->{'fullname'} = $service->{'name'} = $fullname;
+                        $service->{'name'} =~ s/\.$fqdn$//;
+                        $service->{'proto'} = $rec->[0];
+                        $service->{'proto'} =~ s/\.local$//; # always .local (bad assumption)
                     }
                   next;
                 };
                 ($type eq 'srv') && do {
-                    $service{'host'} = $rec->[6];
-                    $service{'port'} = $rec->[5];
+                    my $fullname = $rec->[0];
+                    my $service = $services{$fullname} ||= {};
+                    $service->{'host'} = $rec->[6];
+                    $service->{'port'} = $rec->[5];
                     next;
                 };
                 ($type eq 'txt') && do {
-                    push @{$service{'txt'}}, @$rec[3..$#$rec] if $rec->[3];
+                    my $fullname = $rec->[0];
+                    my $service = $services{$fullname} ||= {};
+                    push @{$service->{'txt'}}, @$rec[3..$#$rec] if $rec->[3];
                     next;
                 };
                 ($type eq 'aaaa') && do {
-                    $service{'ipv6'} = $rec->[3];
+                    $ips{'ipv6'} = $rec->[3];
                     next;
                 };
                 ($type eq 'a') && do {
-                    $service{'ip'} = $rec->[3];
+                    $ips{'ip'} = $rec->[3];
                     next;
                 };
             }
 
-            if ($service{'name'} && $service{'host'}) {
-                $found{$service{'fullname'}} ||= do {
-                    $callback->(\%service) if $callback;
-                    \%service;
+            # copy ips to each service
+            foreach my $service (values %services) {
+              @$service{keys %ips} = values %ips;
+              }
+
+            if (%services) {
+                @found{keys %services} = do {
+                    $callback->(values %services) if $callback;
+                    values %services;
                 };
             }
         },

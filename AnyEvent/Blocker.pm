@@ -193,11 +193,11 @@ has _commandQueue => ( is => 'ro', default => sub{ Thread::Queue->new}, init_arg
 
 sub _doCallback {
   # Not a class/object method!
-  vverbose 0,"AnyEvent::Blocker::Wrapper sent signal!";
+  # vverbose 0,"AnyEvent::Blocker::Wrapper sent signal!";
   while (my $todo = $ResultQueue->dequeue_nb) {
     # one "signal" for each queue entry
     my $tid = $Package->_pipeReceive->getc; # value is a signal, don't care. assume a char is there
-    vverbose 0,"Signalled from thread $tid!";
+    # vverbose 0,"Signalled from thread $tid!";
 
     my $callerid = shift @$todo;
     vverbose 0,"Got result for callerid $callerid: ",Dumper($todo);
@@ -252,10 +252,9 @@ sub AUTOLOAD {
 
   my $method = $AUTOLOAD;
   $method =~ s/^${Package}:://;
-  warn "Proxying $method ".Dumper(\@_);
 
   my $cb = pop @_;
-  croak "Last argument wasn't a code-ref!" if ref($cb) ne 'CODE';
+  croak "Last argument for $method() wasn't a code-ref ($cb)! out of $self, $cb, ".join(", ",@_) if ref($cb) ne 'CODE';
   $self->_callerid($self->_callerid + 1); # that's right, this will eventually overflow.
   $self->_callbacks->{$self->_callerid} = $cb;
   
