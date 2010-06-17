@@ -61,7 +61,7 @@ sub register {
     sub {
       my (undef, $cb, $conn) = @_;
       my $jid = $conn->{'bound_jid'}->as_bare_string;
-      $jid .= '/'.$conn->{'bound_jid'}->resource if $conn->{'bound_jid'}->resource ne 'Home';
+      $jid .= '/'.$conn->{'bound_jid'}->resource if $conn->{'bound_jid'}->resource && $conn->{'bound_jid'}->resource ne 'Home';
 
       $logger->debug("Saw!!! $jid from $conn(".ref($conn).")");
       $self->{'mDNS'}->publish(
@@ -72,7 +72,7 @@ sub register {
         txt => $conn->{'bound_jid'}->as_string." as $jid",
         sub {$logger->debug("Published ".Dumper(\@_))}
         );
-      $cb->decline;
+      $cb->decline; # allow other hooks to cope
       }
     );
   $logger->debug( "Registered for OnInitialPresence");
@@ -97,12 +97,15 @@ sub deliver {
         or return $cb->declined;
 
     $logger->debug("cache ".Dumper($self->{'buddy_cache'}));
-    if (! exists $self->{'buddy_cache'}->{sha1_hex($to)}) {
-      $logger->debug("Don't know where $to is (not in buddy_cache)");
+    my $jid = DJabberd::JID->new($to);
+    my $published_jid = $jid->as_bare_string;
+    $published_jid .= '/'.$jid->resource if $jid->resource && $jid->resource ne 'Home';
+    if (! exists $self->{'buddy_cache'}->{sha1_hex($published_jid)}) {
+      $logger->debug("Don't know where $published_jid ( $to = ".sha1_hex($published_jid).") is (not in buddy_cache)");
       return $cb->declined;
       }
 
-    my ($ip, $port) = @{ $self->{'buddy_cache'}->{sha1_hex($to)} };
+    my ($ip, $port) = @{ $self->{'buddy_cache'}->{sha1_hex($published_jid)} };
     my $domain = $to->domain;
 
     # don't initiate outgoing connections back to ourself
